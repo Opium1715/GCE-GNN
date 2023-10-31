@@ -126,8 +126,8 @@ def obtian_tra():
         train_ids += [s]
         train_dates += [date]
         train_seqs += [outseq]
-    print('item_ctr')
-    print(item_ctr)  # 43098, 37484
+    print('item_ctr ------>')
+    print(item_ctr)  # 43098, 37484, 40728 下一个的标号 实际数量是40728-1
     return train_ids, train_dates, train_seqs
 
 
