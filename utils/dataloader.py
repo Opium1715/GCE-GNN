@@ -8,7 +8,7 @@ def generate_data(datas):
     x = datas[0]
     y = datas[1]
     for sample, label in zip(x, y):
-        yield sample, label
+        yield sample, label  # 生成几个，流式处理接口就放几个，这里并没有按照 输出定义 输出tuple，而是单个的
 
 
 def preprocess(raw_data):
@@ -56,8 +56,9 @@ def process_data(x, y):  # 这里仅是数据集中的一个元素 (x, y) 流式
     # 注意 alias_inputs 并不一致
     vector_length = tf.shape(features)[0]
     n_nodes = tf.shape(items)[0]
-    adj = tf.zeros([n_nodes, n_nodes], dtype=tf.int32)  # 待会看看需不需要+1 注意shape 留意后续处理
-    # 先算出 value 和 index 然后 创建 稀疏矩阵 转化成 密集矩阵
+    adj = tf.zeros([n_nodes, n_nodes], dtype=tf.int32)  # TODO: 待会看看需不需要+1 注意shape 留意后续处理
+    # A.先算出 value 和 index 然后 创建 稀疏矩阵 转化成 密集矩阵
+    # B.如何优化循环，不用python代码
     for i in range(vector_length - 1):
         u = tf.where(condition=items == features[i])[0][0]
         # adj[u][u] = 1
@@ -90,6 +91,26 @@ def compute_max_len(raw_data):
     len_list = [len(d) for d in x]
     max_len = np.max(len_list)
     return max_len
+
+
+def process_adj(adj_dict, n_entity, sample_num, num_dict=None):
+    # 全局图 随机采样
+    adj_entity = np.zeros([n_entity, sample_num], dtype=np.int64)
+    num_entity = np.zeros([n_entity, sample_num], dtype=np.int64)
+    for entity in range(1, n_entity):
+        neighbor = list(adj_dict[entity])
+        neighbor_weight = list(num_dict[entity])
+        n_neighbor = len(neighbor)
+        if n_neighbor == 0:
+            continue
+        if n_neighbor >= sample_num:
+            sampled_indices = np.random.choice(list(range(n_neighbor)), size=sample_num, replace=False)
+        else:
+            sampled_indices = np.random.choice(list(range(n_neighbor)), size=sample_num, replace=True)
+        adj_entity[entity] = np.array([neighbor[i] for i in sampled_indices])
+        num_entity[entity] = np.array([neighbor_weight[i] for i in sampled_indices])
+
+    return adj_entity, num_entity
 
 
 class DataLoader:
@@ -144,7 +165,5 @@ if __name__ == '__main__':
     b = 903
     a = tf.constant(a)
     b = tf.constant(b)
-    data = (a, b)
-    process_data(data)
     # [903, 907, 906, 905, 904, 903, 902, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     # 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
