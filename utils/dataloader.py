@@ -1,8 +1,7 @@
-import pickle
 from functools import partial
-import pdb
-import tensorflow as tf
+
 import numpy as np
+import tensorflow as tf
 
 
 def generate_data(datas):
@@ -49,30 +48,35 @@ def preprocess(raw_data):
     print(alias_inputs)
 
 
-def process_data(row):  # 这里仅是数据集中的一个元素 (x, y) 流式处理时并不带有batch的维度
-    features = row[0]
-    labels = row[1]
+def process_data(x, y):  # 这里仅是数据集中的一个元素 (x, y) 流式处理时并不带有batch的维度
+    # features = row[0]
+    features = x
+    labels = y
     items, alias_inputs = tf.unique(features)
-
+    # 注意 alias_inputs 并不一致
     vector_length = tf.shape(features)[0]
     n_nodes = tf.shape(items)[0]
-    adj = tf.zeros([n_nodes, n_nodes], dtype=tf.int32)  # 待会看看需不需要+1 注意shape
-    adj = tf.Variable(adj)
+    adj = tf.zeros([n_nodes, n_nodes], dtype=tf.int32)  # 待会看看需不需要+1 注意shape 留意后续处理
+    # 先算出 value 和 index 然后 创建 稀疏矩阵 转化成 密集矩阵
     for i in range(vector_length - 1):
         u = tf.where(condition=items == features[i])[0][0]
-        adj[u][u] = 1
+        # adj[u][u] = 1
+        adj = tf.tensor_scatter_nd_update(tensor=adj, indices=[[u, u]], updates=[1])  # depth = 2
         v = tf.where(condition=items == features[i + 1])[0][0]
         if u == v or adj[u][v] == 4:
             continue
-        adj[v][v] = 1
+        # adj[v][v] = 1
+        adj = tf.tensor_scatter_nd_update(tensor=adj, indices=[[v, v]], updates=[1])
         if adj[v][u] == 2:
-            adj[u][v] = 4
-            adj[v][u] = 4
+            # adj[u][v] = 4
+            # adj[v][u] = 4
+            adj = tf.tensor_scatter_nd_update(tensor=adj, indices=[[u, v],
+                                                                   [v, u]], updates=[4, 4])
         else:
-            adj[u][v] = 2
-            adj[v][u] = 3
-    # indices = tf.gather(alias_inputs, tf.stack([tf.range(vector_length - 1), tf.range(vector_length - 1) + 1],
-    #                                            axis=0))
+            # adj[u][v] = 2
+            # adj[v][u] = 3
+            adj = tf.tensor_scatter_nd_update(tensor=adj, indices=[[u, v],
+                                                                   [v, u]], updates=[2, 3])
     mask = tf.fill(tf.shape(features), 1)
 
     x = (alias_inputs, adj, items, mask, features)
@@ -89,13 +93,15 @@ def compute_max_len(raw_data):
 
 
 class DataLoader:
-    def __init__(self, data, train_mode=True):
-        self.max_len = compute_max_len(data)  # 最长序列
+    def __init__(self, raw_data, train_mode=True):
+        self.max_len = compute_max_len(raw_data)  # 最长序列
+        self.data = raw_data
+        self.data = self.reverse_data()  # 反转输入序列
         self.train_mode = train_mode
         # self.max_n_node =
 
-    def dataloader(self, data):
-        dataset = tf.data.Dataset.from_generator(generator=partial(generate_data, data),
+    def dataloader(self):
+        dataset = tf.data.Dataset.from_generator(generator=partial(generate_data, self.data),
                                                  output_signature=(tf.TensorSpec(shape=None,
                                                                                  dtype=tf.int32),
                                                                    tf.TensorSpec(shape=(),
@@ -104,9 +110,11 @@ class DataLoader:
         #     print(data)
         #     break
         # dataset = dataset.map(process_data, num_parallel_calls=tf.data.AUTOTUNE)
-        dataset = dataset.map(process_data, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(process_data)  # 见鬼了，什么奇葩问题
         if self.train_mode:
-            dataset = dataset.shuffle(buffer_size=int(len(data[0]) / 100))
+            pass
+            # TODO： 训练时打开shuffle，调试时避免减损性能
+            # dataset = dataset.shuffle(buffer_size=int(len(self.data[0]) / 100))
         dataset = dataset.padded_batch(batch_size=100,
                                        padded_shapes=(
                                            ([self.max_len],
@@ -120,6 +128,13 @@ class DataLoader:
                                        )
         dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
         return dataset
+
+    def reverse_data(self):
+        x = self.data[0]
+        x = [list(reversed(seq)) for seq in x]
+        y = self.data[1]
+        new_data = (x, y)
+        return new_data
 
 
 if __name__ == '__main__':
