@@ -78,8 +78,8 @@ def process_data(x, y):  # 这里仅是数据集中的一个元素 (x, y) 流式
             # adj[v][u] = 3
             adj = tf.tensor_scatter_nd_update(tensor=adj, indices=[[u, v],
                                                                    [v, u]], updates=[2, 3])
-    mask = tf.fill(tf.shape(features), 1)
-
+    mask = tf.fill(tf.shape(features), 1.0)
+    adj = tf.cast(adj, tf.float32)
     x = (alias_inputs, adj, items, mask, features)
     label = labels - 1
     return x, label
