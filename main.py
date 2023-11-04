@@ -60,9 +60,7 @@ history_recoder = HistoryRecord(log_dir=os.path.join(save_dir, 'log_' + time_str
 p_mrr = P_MRR_Metric(val_data=test_dataloader, performance_mode=1, val_size=int(test_data_size/100))
 model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr_schedule),
               loss=Loss_with_L2(model=model, l2=opt.l2, name='scc_loss_with_l2'),
-              # metrics=[],
-              run_eagerly=False,
-              steps_per_execution=1
+              run_eagerly=False
               )
 model.fit(x=train_dataloader,
           epochs=1,
