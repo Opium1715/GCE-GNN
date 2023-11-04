@@ -186,7 +186,7 @@ class P_MRR_Metric(tf.keras.callbacks.Callback):
         # solution 2： 分批次 size=100
         elif self.performance_mode == 1:
             # y_labels = self.val_data.map(extract_labels)
-            print('calculate P@20 and MRR@20 of current epoch/n')
+            print("calculate P@20 and MRR@20 of current epoch\n")
             with tqdm(total=self.total_val_size) as processbar:
                 for data, labels in self.val_data:
                     predict_result = self.model.predict(x=data,

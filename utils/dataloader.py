@@ -131,7 +131,7 @@ class DataLoader:
         #     print(data)
         #     break
         # dataset = dataset.map(process_data, num_parallel_calls=tf.data.AUTOTUNE)
-        dataset = dataset.map(process_data)  # 见鬼了，什么奇葩问题
+        dataset = dataset.map(process_data, num_parallel_calls=tf.data.AUTOTUNE)  # 见鬼了，什么奇葩问题
         if self.train_mode:
             pass
             # TODO： 训练时打开shuffle，调试时避免减损性能

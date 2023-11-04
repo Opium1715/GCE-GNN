@@ -63,7 +63,7 @@ class LocalAggregator(keras.layers.Layer):
         e_2 = tf.reshape(tf.squeeze(self.leakyrelu(e_2), axis=-1), (batch_size, N, N))
         e_3 = tf.reshape(tf.squeeze(self.leakyrelu(e_3), axis=-1), (batch_size, N, N))
 
-        mask = tf.fill(dims=e_0.shape, value=-9e15)
+        mask = tf.fill(dims=tf.shape(e_0), value=-9e15)
         # the condition tensor acts as a mask that chooses whether the corresponding element / row in the output should
         # be taken from x (if the element in condition is True) or y (if it is False).
         alpha = tf.where(condition=tf.equal(adj, 1), x=e_0, y=mask)
@@ -158,9 +158,11 @@ class GCE_GNN_Model(keras.Model):
 
         initializer = tf.initializers.random_uniform(minval=-self.stdv, maxval=self.stdv)
         # item $ position encode
-        self.embedding = keras.layers.Embedding(self.num_node, self.dim, embeddings_initializer=initializer)
-        self.pos_embedding = keras.layers.Embedding(200, self.dim, embeddings_initializer=initializer)
-
+        self.embedding = keras.layers.Embedding(self.num_node, self.dim, embeddings_initializer=initializer,
+                                                dtype=tf.float32)
+        self.pos_embedding = keras.layers.Embedding(200, self.dim, embeddings_initializer=initializer, dtype=tf.float32)
+        # build 初始化位置编码，使其在正式调用前就存在权重
+        self.pos_embedding.build((None,))
         # Var
         self.w_1 = self.add_weight(shape=(2 * self.dim, self.dim),
                                    dtype=tf.float32,
@@ -245,27 +247,28 @@ class GCE_GNN_Model(keras.Model):
         # seq_hidden = tf.stack([h_combine[index][alias_inputs[index]] for index in tf.range(tf.shape(alias_inputs)[0],
         #                                                                                    dtype=tf.int32)])
         seq_hidden = tf.stack([tf.gather(params=h_combine[index], indices=alias_inputs[index])
-                               for index in tf.range(batch_size)])  # 取出每一个session中的重要信息 先试试
-
+                               for index in range(batch_size)])  # 取出每一个session中的重要信息 先试试
 
         # prediction
         reshape_mask = tf.expand_dims(mask_item, -1)
         # batch_size = seq_hidden.shape[0]
         # len = seq_hidden.shape[1]
         # pos_emb = self.pos_embedding.weights[:len]
-        pos_emb = tf.gather(params=self.pos_embedding, indices=tf.range(seqs_len))
+        # pos_emb = tf.gather(params=self.pos_embedding, indices=tf.range(seqs_len))
+        pos_emb = self.pos_embedding(tf.range(seqs_len, dtype=tf.int32))
         pos_emb = tf.tile(tf.expand_dims(pos_emb, 0), multiples=(batch_size, 1, 1))
 
         hs = tf.reduce_sum(seq_hidden * reshape_mask, -2) / tf.reduce_sum(reshape_mask, 1)
-        hs = tf.tile(tf.expand_dims(hs, -2), multiples=(1, len, 1))
-        nh = tf.matmul(tf.concat([pos_emb, seq_hidden], -1), self.w_1)
+        hs = tf.tile(tf.expand_dims(hs, -2), multiples=(1, seqs_len, 1))
+        nh = tf.matmul(tf.concat([pos_emb, seq_hidden], -1), self.w_1)  # 似乎少了一个偏置？ (11)
         nh = tf.nn.tanh(nh)
         nh = tf.nn.sigmoid(self.glu1(nh) + self.glu2(hs))
         beta = tf.matmul(nh, self.w_2)
         beta = beta * reshape_mask
         select = tf.reduce_sum(beta * seq_hidden, 1)
 
-        b = self.embedding.weights[1:]
+        # b = self.embedding.weights[1:]
+        b = self.embedding(tf.range(start=1, limit=self.num_node))
         score = tf.matmul(select, b, transpose_b=True)
         output = tf.nn.softmax(score)
 
