@@ -15,11 +15,11 @@ class LocalAggregator(keras.layers.Layer):
         self.a_1 = None
         self.a_2 = None
         self.a_3 = None
-        self.bias = None
+        # self.bias = None
         self.stdv = 1.0 / math.sqrt(self.dim)
 
     def build(self, input_shape):  # TODO: 初始化value？
-        initializer = tf.initializers.random_uniform(minval=-self.stdv, maxval=self.stdv)
+        initializer = tf.random_uniform_initializer(minval=-self.stdv, maxval=self.stdv)
         self.a_0 = self.add_weight(shape=(self.dim, 1),
                                    dtype=tf.float32,
                                    initializer=initializer,
@@ -36,10 +36,10 @@ class LocalAggregator(keras.layers.Layer):
                                    dtype=tf.float32,
                                    initializer=initializer,
                                    name='a3')
-        self.bias = self.add_weight(shape=(self.dim,),
-                                    dtype=tf.float32,
-                                    initializer=initializer,
-                                    name='bias_localGraph')  # 似乎没用上？
+        # self.bias = self.add_weight(shape=(self.dim,),
+        #                             dtype=tf.float32,
+        #                             initializer=initializer,
+        #                             name='bias_localGraph')  # 似乎没用上？
 
     def call(self, inputs, *args, **kwargs):  # inputs = (hidden, adj)
         h = inputs[0]
@@ -70,17 +70,17 @@ class LocalAggregator(keras.layers.Layer):
         alpha = tf.where(tf.equal(adj, 2), x=e_1, y=alpha)
         alpha = tf.where(tf.equal(adj, 3), x=e_2, y=alpha)
         alpha = tf.where(tf.equal(adj, 4), x=e_3, y=alpha)
-        alpha = keras.activations.softmax(alpha)  # softmax 将mask下的其他无关数据都变换成了0.
+        alpha = tf.nn.softmax(alpha)  # softmax 将mask下的其他无关数据都变换成了0.
 
-        return tf.matmul(alpha, h)
+        return tf.matmul(alpha, h)  # 这里不是直接×吗？
 
 
 class GlobalAggregator(keras.layers.Layer):
     def __init__(self, dim, dropout):
         super().__init__()
-        self.bias = None
-        self.w_3 = None
+        # self.bias = None
         self.w_2 = None
+        self.q_1 = None
         self.w_1 = None
         self.dropout = keras.layers.Dropout(rate=dropout)
         self.relu = keras.layers.ReLU()  # 还可以切换tanh
@@ -88,23 +88,23 @@ class GlobalAggregator(keras.layers.Layer):
         self.stdv = 1.0 / math.sqrt(self.dim)
 
     def build(self, input_shape):
-        initializer = tf.initializers.random_uniform(minval=-self.stdv, maxval=self.stdv)
-        self.w_1 = self.add_weight(shape=(self.dim + 1, self.dim),
+        initializer = tf.random_uniform_initializer(minval=-self.stdv, maxval=self.stdv)
+        self.w_1 = self.add_weight(shape=(self.dim + 1, self.dim),  # (d+1, d+1)
                                    dtype=tf.float32,
                                    initializer=initializer,
                                    name='w1')
-        self.w_2 = self.add_weight(shape=(self.dim, 1),
+        self.q_1 = self.add_weight(shape=(self.dim, 1),  # (d+1, 1)
+                                   dtype=tf.float32,
+                                   initializer=initializer,
+                                   name='q1')
+        self.w_2 = self.add_weight(shape=(2 * self.dim, self.dim),
                                    dtype=tf.float32,
                                    initializer=initializer,
                                    name='w2')
-        self.w_3 = self.add_weight(shape=(2 * self.dim, self.dim),
-                                   dtype=tf.float32,
-                                   initializer=initializer,
-                                   name='w3')
-        self.bias = self.add_weight(shape=(self.dim,),
-                                    dtype=tf.float32,
-                                    initializer=initializer,
-                                    name='bias_globalGraph')  # 似乎没用上？
+        # self.bias = self.add_weight(shape=(self.dim,),
+        #                             dtype=tf.float32,
+        #                             initializer=initializer,
+        #                             name='bias_globalGraph')  # 似乎没用上？
 
     def call(self, inputs, *args, **kwargs):  # inputs = (self_vectors, neighbor_vector, batch_size, masks,
         # neighbor_weight, extra_vector=None)
@@ -113,7 +113,7 @@ class GlobalAggregator(keras.layers.Layer):
         batch_size = inputs[2]
         masks = inputs[3]
         neighbor_weight = inputs[4]
-        extra_vector = kwargs.get('extra_vector')
+        extra_vector = kwargs.get('extra_vector')  # s (3)
         if extra_vector is not None:  # 得深入研究一下
             # extra_vector = tf.cast(extra_vector, dtype=tf.float32)
             alpha = tf.matmul(a=tf.concat([tf.tile(input=tf.expand_dims(extra_vector, axis=2),
@@ -123,14 +123,14 @@ class GlobalAggregator(keras.layers.Layer):
                                           axis=-1),
                               b=self.w_1)  # TODO：去除了对于最后一维的数据压缩，（None, 39, 12, 100）是不可压缩的， 后续验证一下这样做对不对
             alpha = tf.nn.leaky_relu(features=alpha, alpha=0.2)  # (2)
-            alpha = tf.squeeze(tf.matmul(alpha, self.w_2), axis=-1)
+            alpha = tf.squeeze(tf.matmul(alpha, self.q_1), axis=-1)
             alpha = tf.expand_dims(tf.nn.softmax(alpha), axis=-1)  # 𝜋 (𝑣𝑖, 𝑣𝑗)
             neighbor_vector = tf.reduce_sum(alpha * neighbor_vector, axis=-2)  # hNg𝑣
         else:
-            neighbor_vector = tf.reduce_mean(neighbor_vector, axis=2)
+            neighbor_vector = tf.reduce_mean(neighbor_vector, axis=2)  # 消融
         output = tf.concat([self_vectors, neighbor_vector], -1)
-        output = self.dropout(output)  # 注意training问题  (10)
-        output = tf.matmul(output, self.w_3)
+        output = self.dropout(output)  # 注意training问题  (10)  消融
+        output = tf.matmul(output, self.w_2)
         output = tf.reshape(output, (batch_size, -1, self.dim))  # 这里似乎没必要呢？
         output = self.relu(output)  # (5)h𝑔v
 
@@ -138,13 +138,14 @@ class GlobalAggregator(keras.layers.Layer):
 
 
 class GCE_GNN_Model(keras.Model):
-    def __init__(self, num_node, adj_all, num, opt):
+    def __init__(self, num_node, adj_all, num, opt, seq_len):
         super().__init__()
         self.batch_size = 100
         self.num_node = num_node
         self.dim = 100
         self.hop = 1
         self.sample_num = 12
+        self.seq_len = seq_len
         self.adj_all = tf.constant(adj_all, dtype=tf.int32)
         self.num = tf.constant(num, dtype=tf.float32)
         self.stdv = 1.0 / math.sqrt(self.dim)
@@ -156,28 +157,35 @@ class GCE_GNN_Model(keras.Model):
             agg = GlobalAggregator(dim=self.dim, dropout=opt.dropout_gcn)
             self.global_agg.append(agg)
 
-        initializer = tf.initializers.random_uniform(minval=-self.stdv, maxval=self.stdv)
+        initializer = tf.random_uniform_initializer(minval=-self.stdv, maxval=self.stdv)
         # item $ position encode
         self.embedding = keras.layers.Embedding(self.num_node, self.dim, embeddings_initializer=initializer,
                                                 dtype=tf.float32)
-        self.pos_embedding = keras.layers.Embedding(200, self.dim, embeddings_initializer=initializer, dtype=tf.float32)
+        self.pos_embedding = keras.layers.Embedding(self.seq_len, self.dim, embeddings_initializer=initializer,
+                                                    dtype=tf.float32)
+        #  𝑙 is the length of the current session sequence. 所以有必要开200个吗？
         # build 初始化位置编码，使其在正式调用前就存在权重
         self.pos_embedding.build((None,))
         # Var
-        self.w_1 = self.add_weight(shape=(2 * self.dim, self.dim),
+        self.w_3 = self.add_weight(shape=(2 * self.dim, self.dim),
                                    dtype=tf.float32,
                                    initializer=initializer,
-                                   name='w_1')
-        self.w_2 = self.add_weight(shape=(self.dim, 1),
+                                   name='w_3')
+        self.q_2 = self.add_weight(shape=(self.dim, 1),
                                    dtype=tf.float32,
                                    initializer=initializer,
-                                   name='w_2')
+                                   name='q_2')
         self.glu1 = keras.layers.Dense(units=self.dim,
                                        kernel_initializer=initializer,
                                        use_bias=False)  # 注意bias Dense本身就是一个 output = activation(dot(input, kernel) + bias)
         self.glu2 = keras.layers.Dense(units=self.dim,
                                        kernel_initializer=initializer,
                                        use_bias=True)
+        # new bias
+        self.b_3 = self.add_weight(shape=(self.dim,),
+                                   dtype=tf.float32,
+                                   initializer=initializer,
+                                   name='bias_3')
         self.linear_transform = keras.layers.Dense(units=self.dim, kernel_initializer=initializer)
 
         self.leakyrelu = keras.layers.LeakyReLU(opt.alpha)
@@ -240,14 +248,14 @@ class GCE_GNN_Model(keras.Model):
         h_global = tf.reshape(entity_vectors[0], (batch_size, seqs_len, self.dim))
 
         # combine
-        h_local = self.dropout_local(h_local)  # 不清楚对local为何drop 是0.0
+        h_local = self.dropout_local(h_local)  # 消融
         h_global = self.dropout_global(h_global)
         h_combine = h_local + h_global  # sum_pooling  (10)
 
         # seq_hidden = tf.stack([h_combine[index][alias_inputs[index]] for index in tf.range(tf.shape(alias_inputs)[0],
         #                                                                                    dtype=tf.int32)])
         seq_hidden = tf.stack([tf.gather(params=h_combine[index], indices=alias_inputs[index])
-                               for index in range(batch_size)])  # 取出每一个session中的重要信息 先试试
+                               for index in range(batch_size)])  # 取出每一个session中的重要信息
 
         # prediction
         reshape_mask = tf.expand_dims(mask_item, -1)
@@ -258,16 +266,15 @@ class GCE_GNN_Model(keras.Model):
         pos_emb = self.pos_embedding(tf.range(seqs_len, dtype=tf.int32))
         pos_emb = tf.tile(tf.expand_dims(pos_emb, 0), multiples=(batch_size, 1, 1))
 
-        hs = tf.reduce_sum(seq_hidden * reshape_mask, -2) / tf.reduce_sum(reshape_mask, 1)
+        hs = tf.reduce_sum(seq_hidden * reshape_mask, -2) / tf.reduce_sum(reshape_mask, 1)  # 求每个session中item的平均 (12)
         hs = tf.tile(tf.expand_dims(hs, -2), multiples=(1, seqs_len, 1))
-        nh = tf.matmul(tf.concat([pos_emb, seq_hidden], -1), self.w_1)  # 似乎少了一个偏置？ (11)
+        nh = tf.matmul(tf.concat([pos_emb, seq_hidden], -1), self.w_3) + self.b_3  # 似乎少了一个偏置？ (11)
         nh = tf.nn.tanh(nh)
         nh = tf.nn.sigmoid(self.glu1(nh) + self.glu2(hs))
-        beta = tf.matmul(nh, self.w_2)
+        beta = tf.matmul(nh, self.q_2)
         beta = beta * reshape_mask
         select = tf.reduce_sum(beta * seq_hidden, 1)
 
-        # b = self.embedding.weights[1:]
         b = self.embedding(tf.range(start=1, limit=self.num_node))
         score = tf.matmul(select, b, transpose_b=True)
         output = tf.nn.softmax(score)

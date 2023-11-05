@@ -61,7 +61,7 @@ class HistoryRecord(tf.keras.callbacks.Callback):
         plt.xlabel('epoch')
         plt.ylabel('probabilities')
         plt.title('MMR@20 Curve')
-        plt.legend(loc='upper right')
+        plt.legend(loc='lower right')
         plt.savefig(f"{self.log_dir}/epoch_MRR.png")
         plt.cla()
         plt.close("all")
@@ -85,7 +85,7 @@ class HistoryRecord(tf.keras.callbacks.Callback):
         plt.xlabel('epoch')
         plt.ylabel('probabilities')
         plt.title('P@20 Curve')
-        plt.legend(loc='upper right')
+        plt.legend(loc='lower right')
         plt.savefig(f"{self.log_dir}/epoch_P.png")
         plt.cla()
         plt.close("all")
@@ -134,7 +134,7 @@ class P_MRR(tf.keras.callbacks.Callback):
         precision = []
         mrr = []
         if self.performance_mode == 0:
-            # solution 1：直接一次性全部评估
+            # solution 1：直接一次性全部评估 爆11G显存
             predict_result = self.model.predict(x=self.validation_data,
                                                 verbose=0)
             # predict的shape是[500, node]
@@ -157,7 +157,7 @@ class P_MRR(tf.keras.callbacks.Callback):
             mrr = np.mean(mrr)
             logs['P@20'] = precision
             logs['MRR@20'] = mrr
-        # solution 2： 分批次 size=100
+        # solution 2： 分批次 size=100 4it/s
         elif self.performance_mode == 1:
             # y_labels = self.validation_data.map(extract_labels)
             print("calculate P@20 and MRR@20 of current epoch\n")
@@ -178,27 +178,22 @@ class P_MRR(tf.keras.callbacks.Callback):
             mrr = np.mean(mrr)
             logs['P@20'] = precision
             logs['MRR@20'] = mrr
+        # solution 3: 矩阵式分批次，性能调优 10it/s
         elif self.performance_mode == 2:
             print("\ncalculate P@20 and MRR@20 of current epoch\n")
-            # with tqdm(total=self.total_val_size) as pb:
-            # raw_predict_result = self.model.predict(x=self.validation_data,
-            #                                         verbose=1)
-            # predict_result_list = tf.split(raw_predict_result, num_or_size_splits=self.total_val_size)
             for x, y_true in tqdm(self.validation_data, total=self.total_val_size, desc='evaluating P@20 & MRR@20:'):
                 y_pred = self.model.predict_on_batch(x=x)
                 batch_size = tf.cast(tf.shape(y_pred)[0], dtype=tf.int64)
                 top_k_result = tf.math.in_top_k(targets=y_true, predictions=y_pred, k=20)
                 precision.append(top_k_result)
-                # mrr.append(tf.where(condition=tf.equal(top_k_result, True),
-                #                     x=1 / tf.where(condition=tf.equal(y_pred, y_true)),
-                #                     y=tf.zeros((batch_size,), dtype=tf.int32)))
                 non_zeros_num = tf.math.count_nonzero(top_k_result)
+                # 获取在非零元素中对应的item排位次序：[batch_no, rank_no] ---> [rank_no]
                 indices = tf.stack([tf.range(non_zeros_num), tf.ones((non_zeros_num,), dtype=tf.int64)], axis=1)
                 mrr.append(tf.concat(
                     [1 / tf.cast(tf.gather_nd(tf.where(
                         condition=tf.equal(tf.math.top_k(y_pred, k=20).indices, tf.expand_dims(y_true, axis=1))),
                         indices) + 1, dtype=tf.float32),
-                     tf.zeros((batch_size - non_zeros_num,), dtype=tf.float32)],
+                     tf.zeros((batch_size - non_zeros_num,), dtype=tf.float32)],  # 与0拼接，保持矩阵shape
                     axis=0))
             precision = tf.reduce_mean(tf.cast(tf.stack(precision), tf.float32))
             mrr = tf.reduce_mean(tf.stack(mrr))
