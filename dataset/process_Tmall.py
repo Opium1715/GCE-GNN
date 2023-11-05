@@ -17,7 +17,7 @@ with open('tmall/tmall_data.csv', 'w') as tmall_data:
         tmall_data.write(header)
         for line in tqdm.tqdm(tmall_file, desc="重采样数据:", unit="line"):
             data = line[:-1].split('\t')
-            if int(data[2]) > 120000:  # 载入多少session data[2]-----sessionId
+            if int(data[2]) > 10000:  # 载入多少session data[2]-----sessionId 120000
                 break
             tmall_data.write(line)
 

@@ -2,12 +2,13 @@ import argparse
 import datetime
 import os
 import pickle
-import tensorflow as tf
+
 from tensorflow import keras
-from utils.dataloader import DataLoader, process_adj
+
 from model.model import GCE_GNN_Model
-from utils.myCallback import HistoryRecord, P_MRR_Metric
+from utils.dataloader import DataLoader, process_adj, compute_item_num
 from utils.loss import Loss_with_L2
+from utils.myCallback import HistoryRecord, P_MRR
 
 # tf.config.run_functions_eagerly(True)
 # tf.data.experimental.enable_debug_mode()
@@ -28,20 +29,24 @@ opt = parser.parse_args()
 path_dataset = 'dataset/tmall'
 train_data = pickle.load(open(f'{path_dataset}/train.txt', 'rb'))
 test_data = pickle.load(open(f'{path_dataset}/test.txt', 'rb'))
+all_data = pickle.load(open(f'{path_dataset}/all_train_seq.txt', 'rb'))
 train_data_size = len(train_data[1])
 epoch_steps = train_data_size / 100
 test_data_size = len(test_data[1])
+node_num = compute_item_num(all_data) + 1
 
 train_dataloader = DataLoader(train_data, train_mode=True).dataloader()
 test_dataloader = DataLoader(test_data, train_mode=False).dataloader()
+
+
 adj = pickle.load(open('dataset/tmall/adj_12.pkl', 'rb'))
 num = pickle.load(open('dataset/tmall/num_12.pkl', 'rb'))
-adj, num = process_adj(adj, n_entity=40728, sample_num=12, num_dict=num)
+adj, num = process_adj(adj, n_entity=node_num, sample_num=12, num_dict=num)
 
 # model
 save_dir = 'logs'
 time_str = datetime.datetime.strftime(datetime.datetime.now(), '%Y_%m_%d_%H_%M_%S')
-model = GCE_GNN_Model(num_node=40728, adj_all=adj, num=num, opt=opt)
+model = GCE_GNN_Model(num_node=node_num, adj_all=adj, num=num, opt=opt)
 lr_schedule = keras.optimizers.schedules.ExponentialDecay(initial_learning_rate=opt.lr,
                                                           decay_rate=opt.lr_dc,
                                                           decay_steps=opt.lr_dc_step * epoch_steps,
@@ -57,7 +62,7 @@ checkpoint_best = keras.callbacks.ModelCheckpoint(filepath=os.path.join(save_dir
                                                   save_best_only=True,
                                                   save_freq='epoch')
 history_recoder = HistoryRecord(log_dir=os.path.join(save_dir, 'log_' + time_str))
-p_mrr = P_MRR_Metric(val_data=test_dataloader, performance_mode=1, val_size=int(test_data_size/100))
+p_mrr = P_MRR(val_data=test_dataloader, performance_mode=2, val_size=int(test_data_size/100))
 model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr_schedule),
               loss=Loss_with_L2(model=model, l2=opt.l2, name='scc_loss_with_l2'),
               run_eagerly=False

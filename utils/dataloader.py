@@ -1,4 +1,5 @@
 from functools import partial
+from itertools import chain
 
 import numpy as np
 import tensorflow as tf
@@ -91,6 +92,12 @@ def compute_max_len(raw_data):
     len_list = [len(d) for d in x]
     max_len = np.max(len_list)
     return max_len
+
+
+def compute_item_num(sequence):
+    seq_in_1D = list(chain.from_iterable(sequence))
+    items_num = len(np.unique(seq_in_1D))
+    return items_num
 
 
 def process_adj(adj_dict, n_entity, sample_num, num_dict=None):
