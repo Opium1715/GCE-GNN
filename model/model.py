@@ -190,7 +190,8 @@ class GCE_GNN_Model(keras.Model):
 
         self.leakyrelu = keras.layers.LeakyReLU(opt.alpha)
         self.dropout_local = keras.layers.Dropout(opt.dropout_local)
-        self.dropout_global = keras.layers.Dropout(opt.dropout_global)
+        # self.dropout_global = keras.layers.Dropout(opt.dropout_global)\
+        self.dropout_global = keras.layers.GaussianDropout(opt.dropout_global)
 
     def call(self, inputs, training=None, mask=None):  # inputs = (alias_inputs, adj, items, mask_item, features)
         alias_inputs = inputs[0]
@@ -244,7 +245,7 @@ class GCE_GNN_Model(keras.Model):
                                     extra_vector=session_info[hop])
                 entity_vectors_next_iter.append(vector)
             entity_vectors = entity_vectors_next_iter
-
+        # hop>=2, 是不是要取最后一个
         h_global = tf.reshape(entity_vectors[0], (batch_size, seqs_len, self.dim))
 
         # combine
@@ -263,7 +264,7 @@ class GCE_GNN_Model(keras.Model):
         # len = seq_hidden.shape[1]
         # pos_emb = self.pos_embedding.weights[:len]
         # pos_emb = tf.gather(params=self.pos_embedding, indices=tf.range(seqs_len))
-        pos_emb = self.pos_embedding(tf.range(seqs_len, dtype=tf.int32))
+        pos_emb = self.pos_embedding(tf.range(start=seqs_len - 1, limit=-1, delta=-1, dtype=tf.int32))  # 试试取反向？
         pos_emb = tf.tile(tf.expand_dims(pos_emb, 0), multiples=(batch_size, 1, 1))
 
         hs = tf.reduce_sum(seq_hidden * reshape_mask, -2) / tf.reduce_sum(reshape_mask, 1)  # 求每个session中item的平均 (12)

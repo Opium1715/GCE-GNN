@@ -22,7 +22,7 @@ parser.add_argument('--n_sample', type=int, default=12)
 parser.add_argument('--n_iter', type=int, default=1)                                    # [1, 2]
 parser.add_argument('--dropout_gcn', type=float, default=0, help='Dropout rate.')       # [0, 0.2, 0.4, 0.6, 0.8]
 parser.add_argument('--dropout_local', type=float, default=0, help='Dropout rate.')     # [0, 0.5]
-parser.add_argument('--dropout_global', type=float, default=0.55, help='Dropout rate.')  # 超参能不能学习呢？
+parser.add_argument('--dropout_global', type=float, default=0.7, help='Dropout rate.')  # 超参能不能学习呢？
 parser.add_argument('--alpha', type=float, default=0.2, help='Alpha for the leaky_relu.')
 opt = parser.parse_args()
 
@@ -54,7 +54,7 @@ lr_schedule = keras.optimizers.schedules.ExponentialDecay(initial_learning_rate=
                                                           staircase=True)
 early_stopping = keras.callbacks.EarlyStopping(monitor='MRR@20',
                                                min_delta=0,
-                                               patience=4,
+                                               patience=6,
                                                verbose=1,
                                                mode='max')
 checkpoint_best = keras.callbacks.ModelCheckpoint(filepath=os.path.join(save_dir, 'best_weights.h5'),
