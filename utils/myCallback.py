@@ -163,9 +163,7 @@ class P_MRR(tf.keras.callbacks.Callback):
             print("calculate P@20 and MRR@20 of current epoch\n")
             with tqdm(total=self.total_val_size) as processbar:
                 for data, labels in self.validation_data:
-                    predict_result = self.model.predict(x=data,
-                                                        batch_size=100,
-                                                        verbose=0)
+                    predict_result = self.model.predict_on_batch(x=data)
                     indices = tf.argsort(predict_result, axis=1, direction="DESCENDING")[:, :20]
                     for index, label in zip(indices, labels):
                         precision.append(np.isin(label, index))
@@ -178,11 +176,12 @@ class P_MRR(tf.keras.callbacks.Callback):
             mrr = np.mean(mrr)
             logs['P@20'] = precision
             logs['MRR@20'] = mrr
-        # solution 3: 矩阵式分批次，性能调优 10it/s
+        # solution 3: 矩阵式分批次，性能调优 20it/s
         elif self.performance_mode == 2:
             print("\ncalculate P@20 and MRR@20 of current epoch\n")
             for x, y_true in tqdm(self.validation_data, total=self.total_val_size, desc='evaluating P@20 & MRR@20:'):
                 y_pred = self.model.predict_on_batch(x=x)
+                # y_pred = tf.cast(y_pred, tf.float64)
                 batch_size = tf.cast(tf.shape(y_pred)[0], dtype=tf.int64)
                 top_k_result = tf.math.in_top_k(targets=y_true, predictions=y_pred, k=20)
                 precision.append(top_k_result)
@@ -192,11 +191,11 @@ class P_MRR(tf.keras.callbacks.Callback):
                 mrr.append(tf.concat(
                     [1 / tf.cast(tf.gather_nd(tf.where(
                         condition=tf.equal(tf.math.top_k(y_pred, k=20).indices, tf.expand_dims(y_true, axis=1))),
-                        indices) + 1, dtype=tf.float32),
-                     tf.zeros((batch_size - non_zeros_num,), dtype=tf.float32)],  # 与0拼接，保持矩阵shape
+                        indices) + 1, dtype=tf.float64),
+                     tf.zeros((batch_size - non_zeros_num,), dtype=tf.float64)],  # 与0拼接，保持矩阵shape
                     axis=0))
-            precision = tf.reduce_mean(tf.cast(tf.stack(precision), tf.float32))
-            mrr = tf.reduce_mean(tf.stack(mrr))
+            precision = tf.reduce_mean(tf.cast(tf.stack(precision), tf.float64))
+            mrr = tf.reduce_mean(tf.cast(tf.stack(mrr), tf.float64))
             logs['P@20'] = precision.numpy()
             logs['MRR@20'] = mrr.numpy()
 

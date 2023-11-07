@@ -89,11 +89,11 @@ class GlobalAggregator(keras.layers.Layer):
 
     def build(self, input_shape):
         initializer = tf.random_uniform_initializer(minval=-self.stdv, maxval=self.stdv)
-        self.w_1 = self.add_weight(shape=(self.dim + 1, self.dim),  # (d+1, d+1)
+        self.w_1 = self.add_weight(shape=(self.dim + 1, self.dim + 1),  # (d+1, d+1)
                                    dtype=tf.float32,
                                    initializer=initializer,
                                    name='w1')
-        self.q_1 = self.add_weight(shape=(self.dim, 1),  # (d+1, 1)
+        self.q_1 = self.add_weight(shape=(self.dim + 1, 1),  # (d+1, 1)
                                    dtype=tf.float32,
                                    initializer=initializer,
                                    name='q1')
@@ -131,7 +131,7 @@ class GlobalAggregator(keras.layers.Layer):
         output = tf.concat([self_vectors, neighbor_vector], -1)
         output = self.dropout(output)  # 注意training问题  (10)  消融
         output = tf.matmul(output, self.w_2)
-        output = tf.reshape(output, (batch_size, -1, self.dim))  # 这里似乎没必要呢？
+        # output = tf.reshape(output, (batch_size, -1, self.dim))  # 这里似乎没必要呢？
         output = self.relu(output)  # (5)h𝑔v
 
         return output
@@ -175,12 +175,22 @@ class GCE_GNN_Model(keras.Model):
                                    dtype=tf.float32,
                                    initializer=initializer,
                                    name='q_2')
-        self.glu1 = keras.layers.Dense(units=self.dim,
-                                       kernel_initializer=initializer,
-                                       use_bias=False)  # 注意bias Dense本身就是一个 output = activation(dot(input, kernel) + bias)
-        self.glu2 = keras.layers.Dense(units=self.dim,
-                                       kernel_initializer=initializer,
-                                       use_bias=True)
+        # self.glu1 = keras.layers.Dense(units=self.dim, kernel_initializer=initializer,
+        # bias_initializer=initializer, use_bias=True)  # 注意bias Dense本身就是一个 output = activation(dot(input,
+        # kernel) + bias) self.glu2 = keras.layers.Dense(units=self.dim, kernel_initializer=initializer,
+        # use_bias=False) 改一下（13）的表示方式：
+        self.w_4 = self.add_weight(shape=(self.dim, self.dim),
+                                   dtype=tf.float32,
+                                   initializer=initializer,
+                                   name='w_4')
+        self.w_5 = self.add_weight(shape=(self.dim, self.dim),
+                                   dtype=tf.float32,
+                                   initializer=initializer,
+                                   name='w_5')
+        self.b_4 = self.add_weight(shape=(self.dim,),
+                                   dtype=tf.float32,
+                                   initializer=initializer,
+                                   name='bias_4')
         # new bias
         self.b_3 = self.add_weight(shape=(self.dim,),
                                    dtype=tf.float32,
@@ -191,7 +201,7 @@ class GCE_GNN_Model(keras.Model):
         self.leakyrelu = keras.layers.LeakyReLU(opt.alpha)
         self.dropout_local = keras.layers.Dropout(opt.dropout_local)
         # self.dropout_global = keras.layers.Dropout(opt.dropout_global)\
-        self.dropout_global = keras.layers.GaussianDropout(opt.dropout_global)
+        self.dropout_global = keras.layers.Dropout(opt.dropout_global)
 
     def call(self, inputs, training=None, mask=None):  # inputs = (alias_inputs, adj, items, mask_item, features)
         alias_inputs = inputs[0]
@@ -264,14 +274,15 @@ class GCE_GNN_Model(keras.Model):
         # len = seq_hidden.shape[1]
         # pos_emb = self.pos_embedding.weights[:len]
         # pos_emb = tf.gather(params=self.pos_embedding, indices=tf.range(seqs_len))
-        pos_emb = self.pos_embedding(tf.range(start=seqs_len - 1, limit=-1, delta=-1, dtype=tf.int32))  # 试试取反向？
+        pos_emb = self.pos_embedding(tf.range(seqs_len, dtype=tf.int32))  # 试试取反向？
         pos_emb = tf.tile(tf.expand_dims(pos_emb, 0), multiples=(batch_size, 1, 1))
 
         hs = tf.reduce_sum(seq_hidden * reshape_mask, -2) / tf.reduce_sum(reshape_mask, 1)  # 求每个session中item的平均 (12)
         hs = tf.tile(tf.expand_dims(hs, -2), multiples=(1, seqs_len, 1))
         nh = tf.matmul(tf.concat([pos_emb, seq_hidden], -1), self.w_3) + self.b_3  # 似乎少了一个偏置？ (11)
         nh = tf.nn.tanh(nh)
-        nh = tf.nn.sigmoid(self.glu1(nh) + self.glu2(hs))
+        # nh = tf.nn.sigmoid(self.glu1(nh) + self.glu2(hs))]
+        nh = tf.nn.sigmoid(tf.matmul(nh, self.w_4) + tf.matmul(hs, self.w_5) + self.b_4)  # (13)
         beta = tf.matmul(nh, self.q_2)
         beta = beta * reshape_mask
         select = tf.reduce_sum(beta * seq_hidden, 1)
